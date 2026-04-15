@@ -17,13 +17,12 @@
         .custom-scrollbar::-webkit-scrollbar-track { background: rgba(255,255,255,0.02); }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(251,191,36,0.3); border-radius: 10px; }
         
-        /* Gaya slider kustom */
         input[type=range] { -webkit-appearance: none; background: transparent; height: 16px; }
         input[type=range]:focus { outline: none; }
         input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 12px; width: 12px; border-radius: 50%; background: #f59e0b; cursor: pointer; border: 2px solid #000; margin-top: -4px; box-shadow: 0 0 8px rgba(245,158,11,0.3); }
         input[type=range]::-webkit-slider-runnable-track { width: 100%; height: 3px; cursor: pointer; background: #1a1a1a; border-radius: 2px; border: 1px solid rgba(255,255,255,0.05); }
 
-        /* Garis Penanda Masa (Playhead) */
+        /* Playhead Line Visual */
         .playhead-line {
             pointer-events: none;
             box-shadow: 0 0 10px #fbbf24, 0 0 3px rgba(251,191,36,0.8);
@@ -33,10 +32,9 @@
             height: 100%;
             position: absolute;
             top: 0;
-            transition: left 0.1s linear;
+            will-change: left;
         }
 
-        /* Penunjuk segitiga playhead */
         .playhead-marker {
             width: 14px;
             height: 14px;
@@ -46,18 +44,20 @@
             left: -6px;
             clip-path: polygon(0% 0%, 100% 0%, 50% 100%);
             z-index: 60;
-            filter: drop-shadow(0 0 5px rgba(251,191,36,0.5));
         }
 
-        .waveform-bar {
-            transition: height 0.2s ease;
-        }
-
-        /* Playlist Active State */
         .playlist-item-active {
             background: rgba(245, 158, 11, 0.1);
             border-color: rgba(245, 158, 11, 0.3);
             color: #f59e0b;
+        }
+
+        .beat-flash {
+            animation: flash 0.1s ease-out;
+        }
+        @keyframes flash {
+            0% { transform: scale(1.1); filter: brightness(1.5); }
+            100% { transform: scale(1); filter: brightness(1); }
         }
     </style>
 </head>
@@ -70,7 +70,7 @@
         import * as Tone from 'https://esm.sh/tone@14.8.49';
         import { 
             Play, Pause, Square, Volume2, Music, Activity, Timer, Trash2, Upload, Headphones, 
-            Plus, Loader2, ChevronUp, ChevronDown, Waves, X, Info, RotateCcw, FolderUp, ListMusic, ChevronRight
+            Plus, Loader2, ChevronUp, ChevronDown, Waves, X, Info, RotateCcw, FolderUp, ListMusic, ChevronRight, PanelLeftClose, PanelLeft
         } from 'https://esm.sh/lucide-react@0.263.1';
 
         const App = () => {
@@ -85,10 +85,11 @@
             const [transpose, setTranspose] = useState(0); 
             const [currentTime, setCurrentTime] = useState(0);
             const [isAnalyzing, setIsAnalyzing] = useState(false);
-            const [projectName, setProjectName] = useState("");
+            const [isBeatActive, setIsBeatActive] = useState(false);
+            const [isPlaylistVisible, setIsPlaylistVisible] = useState(true); // Fitur Hide Playlist
             
             // Playlist States
-            const [playlist, setPlaylist] = useState([]); // Array of projects { name, stems, bpm }
+            const [playlist, setPlaylist] = useState([]); 
             const [currentProjectIndex, setCurrentProjectIndex] = useState(-1);
             const [stems, setStems] = useState([]);
 
@@ -102,11 +103,11 @@
 
             const masterTrack = useMemo(() => stems.length > 0 ? stems[0] : null, [stems]);
 
-            // --- INIT AUDIO ENGINE ---
+            // --- AUDIO INITIALIZATION ---
             useEffect(() => {
                 metronomeVolNode.current = new Tone.Volume(metronomeVolume).toDestination();
                 clickSynth.current = new Tone.Synth({
-                    oscillator: { type: "sine" },
+                    oscillator: { type: "square8" },
                     envelope: { attack: 0.001, decay: 0.05, sustain: 0, release: 0.05 }
                 }).connect(metronomeVolNode.current);
 
@@ -128,27 +129,38 @@
                 };
             }, []);
 
-            // Metronome logic
+            // --- METRONOME ENGINE ---
             useEffect(() => {
                 if (metronomeEventId.current !== null) Tone.Transport.clear(metronomeEventId.current);
-                const interval = isMetronomeDouble ? "8n" : "4n";
+                
+                const interval = "8n";
                 metronomeEventId.current = Tone.Transport.scheduleRepeat((time) => {
                     const ticks = Tone.Transport.getTicksAtTime(time);
                     const ppq = Tone.Transport.PPQ;
+                    
                     const isOnBeat = Math.abs(ticks % ppq) < 10 || Math.abs((ticks % ppq) - ppq) < 10;
-                    const isOnOffBeat = Math.abs(ticks % (ppq / 2)) < 10 && !isOnBeat;
+                    const isOnOffBeat = !isOnBeat && (Math.abs(ticks % (ppq / 2)) < 10 || Math.abs((ticks % (ppq / 2)) - (ppq / 2)) < 10);
 
                     if (isOnBeat) {
                         const beatIndex = Math.round(ticks / ppq) % 4;
                         if (beatIndex === 0) clickSynth.current.triggerAttackRelease("C5", "32n", time, 1.0);
-                        else clickSynth.current.triggerAttackRelease("G4", "32n", time, 0.4);
+                        else clickSynth.current.triggerAttackRelease("G4", "32n", time, 0.5);
+                        
+                        Tone.Draw.schedule(() => {
+                            setIsBeatActive(true);
+                            setTimeout(() => setIsBeatActive(false), 50);
+                        }, time);
                     } else if (isMetronomeDouble && isOnOffBeat) {
                         clickSynth.current.triggerAttackRelease("E4", "32n", time, 0.2);
+                        Tone.Draw.schedule(() => {
+                            setIsBeatActive(true);
+                            setTimeout(() => setIsBeatActive(false), 30);
+                        }, time);
                     }
-                }, "8n");
-            }, [isMetronomeDouble]);
+                }, interval);
+            }, [isMetronomeDouble, bpm]);
 
-            // Sync States
+            // --- SINKRONISASI PARAMETER ---
             useEffect(() => { 
                 const effectiveBpm = bpm * playbackRate;
                 if (!isNaN(effectiveBpm) && effectiveBpm > 0) Tone.Transport.bpm.value = effectiveBpm; 
@@ -169,7 +181,7 @@
                 }
             }, [metronomeVolume, isMetronomeOn]);
 
-            // Waveform Generator
+            // --- WAVEFORM GENERATOR ---
             const generateWaveformData = (buffer) => {
                 const data = buffer.getChannelData(0);
                 const segments = 300; 
@@ -186,7 +198,7 @@
                 return points;
             };
 
-            // Tempo Detection
+            // --- BPM DETECTION ---
             const detectBPMFromBuffer = (buffer) => {
                 const data = buffer.getChannelData(0);
                 const sampleRate = buffer.sampleRate;
@@ -213,47 +225,26 @@
                 return result;
             };
 
-            const toggleMute = (id) => {
-                setStems(prev => prev.map(s => {
-                    if (s.id === id) {
-                        const newMuted = !s.muted;
-                        if (volumes.current[id]) volumes.current[id].mute = newMuted;
-                        return { ...s, muted: newMuted };
-                    }
-                    return s;
-                }));
-            };
-
-            const toggleSolo = (id) => {
-                setStems(prev => {
-                    const newStems = prev.map(s => s.id === id ? { ...s, solo: !s.solo } : s);
-                    newStems.forEach(s => { if (solos.current[s.id]) solos.current[s.id].solo = s.solo; });
-                    return newStems;
-                });
-            };
-
-            const handleSeek = (e, duration) => {
-                if (!duration) return;
-                const rect = e.currentTarget.getBoundingClientRect();
-                const x = e.clientX - rect.left;
-                const percent = Math.max(0, Math.min(1, x / rect.width));
-                const seekTime = percent * duration;
-                Tone.Transport.seconds = seekTime;
-                setCurrentTime(seekTime);
-            };
-
-            // --- PLAYLIST LOADING LOGIC ---
+            // --- PLAYLIST LOGIC (DIPERBAIKI UNTUK IPHONE) ---
             const handlePlaylistLoad = async (event) => {
                 const files = Array.from(event.target.files);
                 if (files.length === 0) return;
 
-                // Group files by subfolder name (Song Title)
                 const projectGroups = {};
                 files.forEach(file => {
                     if (!file.type.startsWith('audio/')) return;
-                    const pathParts = file.webkitRelativePath.split('/');
-                    // Usually: Root/Subfolder/file.mp3
-                    const folderName = pathParts.length > 2 ? pathParts[pathParts.length - 2] : "Uncategorized";
+                    
+                    // Deteksi struktur folder (untuk Desktop)
+                    const pathParts = file.webkitRelativePath ? file.webkitRelativePath.split('/') : [];
+                    
+                    // Logika fallback untuk iPhone (jika webkitRelativePath kosong)
+                    let folderName = "Uploaded Tracks";
+                    if (pathParts.length > 2) {
+                        folderName = pathParts[pathParts.length - 2];
+                    } else if (pathParts.length === 2) {
+                        folderName = pathParts[0];
+                    }
+
                     if (!projectGroups[folderName]) projectGroups[folderName] = [];
                     projectGroups[folderName].push(file);
                 });
@@ -261,19 +252,13 @@
                 const groupNames = Object.keys(projectGroups);
                 if (groupNames.length === 0) return;
 
-                setProjectName("Playlist Loaded");
-                
-                // Construct Playlist Object
                 const playlistData = groupNames.map(name => ({
                     name: name,
                     files: projectGroups[name],
-                    stems: [],
-                    bpm: 120,
                     loaded: false
                 }));
 
                 setPlaylist(playlistData);
-                // Load the first song automatically
                 loadProjectFromPlaylist(0, playlistData);
             };
 
@@ -286,8 +271,9 @@
 
                 if (Tone.context.state !== 'running') await Tone.start();
                 
-                // Cleanup Audio
                 Tone.Transport.stop();
+                setIsPlaying(false);
+                setIsPaused(false);
                 Object.values(players.current).forEach(p => p.dispose());
                 players.current = {}; volumes.current = {}; solos.current = {};
                 setStems([]);
@@ -308,7 +294,6 @@
                         player.sync().start(0);
                         
                         players.current[trackId] = player; volumes.current[trackId] = vol; solos.current[trackId] = solo;
-
                         const waveform = generateWaveformData(buffer);
 
                         newStems.push({ 
@@ -332,10 +317,40 @@
                 setIsAnalyzing(false);
             };
 
+            const handleSeek = async (e, duration) => {
+                if (!duration) return;
+                if (Tone.context.state !== 'running') await Tone.start();
+                const rect = e.currentTarget.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const percent = Math.max(0, Math.min(1, x / rect.width));
+                const seekTime = percent * duration;
+                Tone.Transport.seconds = seekTime;
+                setCurrentTime(seekTime);
+            };
+
             const handleVolumeChange = (id, val) => {
                 const v = parseFloat(val);
                 if (volumes.current[id]) volumes.current[id].volume.value = v;
                 setStems(prev => prev.map(s => s.id === id ? { ...s, volume: v } : s));
+            };
+
+            const toggleMute = (id) => {
+                setStems(prev => prev.map(s => {
+                    if (s.id === id) {
+                        const newMuted = !s.muted;
+                        if (volumes.current[id]) volumes.current[id].mute = newMuted;
+                        return { ...s, muted: newMuted };
+                    }
+                    return s;
+                }));
+            };
+
+            const toggleSolo = (id) => {
+                setStems(prev => {
+                    const newStems = prev.map(s => s.id === id ? { ...s, solo: !s.solo } : s);
+                    newStems.forEach(s => { if (solos.current[s.id]) solos.current[s.id].solo = s.solo; });
+                    return newStems;
+                });
             };
 
             const formatTime = (s) => `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
@@ -344,17 +359,22 @@
                 <div className="flex h-screen bg-[#050505] text-slate-200 font-sans overflow-hidden">
                     
                     {/* SIDEBAR PLAYLIST */}
-                    <aside className="w-64 bg-black/40 border-r border-white/5 flex flex-col shrink-0">
-                        <div className="p-4 border-b border-white/5 flex items-center gap-3">
-                            <ListMusic className="text-amber-500" size={20} />
-                            <h2 className="font-black text-xs uppercase tracking-[0.2em]">Playlist</h2>
+                    <aside className={`${isPlaylistVisible ? 'w-64' : 'w-0'} transition-all duration-300 bg-black/40 border-r border-white/5 flex flex-col shrink-0 overflow-hidden`}>
+                        <div className="p-4 border-b border-white/5 flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                                <ListMusic className="text-amber-500" size={20} />
+                                <h2 className="font-black text-xs uppercase tracking-[0.2em]">Playlist</h2>
+                            </div>
+                            <button onClick={() => setIsPlaylistVisible(false)} className="p-1 hover:bg-white/5 rounded text-slate-500">
+                                <PanelLeftClose size={16} />
+                            </button>
                         </div>
                         
                         <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
                             {playlist.length === 0 ? (
                                 <div className="py-10 text-center px-4">
                                     <p className="text-[10px] text-slate-600 uppercase font-bold tracking-widest leading-loose italic">
-                                        Upload folder yang berisi folder judul lagu
+                                        Pilih folder atau beberapa file audio sekaligus
                                     </p>
                                 </div>
                             ) : (
@@ -376,8 +396,15 @@
 
                         <div className="p-4 border-t border-white/5">
                             <label className="w-full py-3 bg-white/5 hover:bg-white/10 text-slate-400 rounded-xl text-[10px] font-black uppercase tracking-widest border border-white/5 cursor-pointer transition-all flex items-center justify-center gap-2">
-                                <FolderUp size={14} /> Open Playlist
-                                <input type="file" webkitdirectory="true" directory="true" className="hidden" onChange={handlePlaylistLoad} />
+                                <FolderUp size={14} /> Open Music
+                                <input 
+                                    type="file" 
+                                    webkitdirectory="true" 
+                                    directory="true" 
+                                    multiple 
+                                    className="hidden" 
+                                    onChange={handlePlaylistLoad} 
+                                />
                             </label>
                         </div>
                     </aside>
@@ -387,7 +414,17 @@
                         <header className="bg-black/95 backdrop-blur-xl border-b border-white/5 p-2 px-4 sticky top-0 z-[100]">
                             <div className="max-w-7xl mx-auto flex items-center justify-between">
                                 <div className="flex items-center gap-2">
-                                    <div className="w-8 h-8 bg-amber-500 rounded flex items-center justify-center shadow-lg"><Headphones className="text-black" size={18} /></div>
+                                    {/* Tombol Toggle Playlist jika tersembunyi */}
+                                    {!isPlaylistVisible && (
+                                        <button 
+                                            onClick={() => setIsPlaylistVisible(true)}
+                                            className="p-2 hover:bg-white/5 rounded-lg text-amber-500 mr-2 transition-all"
+                                            title="Tampilkan Playlist"
+                                        >
+                                            <PanelLeft size={20} />
+                                        </button>
+                                    )}
+                                    <div className="w-8 h-8 bg-amber-500 rounded flex items-center justify-center shadow-lg shadow-amber-900/40"><Headphones className="text-black" size={18} /></div>
                                     <div>
                                         <h1 className="text-sm font-black text-white uppercase leading-none tracking-tighter italic">Bamboenyi Audio Workstation</h1>
                                         <p className="text-[6px] text-slate-500 font-bold uppercase tracking-widest">
@@ -395,10 +432,10 @@
                                         </p>
                                     </div>
                                 </div>
-                                <div className="flex items-center gap-1.5 bg-white/[0.02] p-1 rounded-lg border border-white/5 font-bold shadow-inner">
+                                <div className="flex items-center gap-1.5 bg-white/[0.02] p-1 rounded-lg border border-white/5 font-bold shadow-inner text-[10px]">
                                     <div className="px-3 py-0.5 border-r border-white/5 text-center"><span className="text-[6px] text-slate-500 block uppercase mb-0.5 tracking-tighter">Bpm</span><span className="text-amber-400 text-xs font-mono">{bpm}</span></div>
                                     <div className="px-3 py-0.5 border-r border-white/5 text-center"><span className="text-[6px] text-slate-500 block uppercase mb-0.5 tracking-tighter">Key</span><span className="text-blue-400 text-xs font-mono uppercase">{detectedKey}</span></div>
-                                    <div className="px-3 py-0.5 text-center"><span className="text-[6px] text-slate-500 block uppercase mb-0.5 tracking-tighter">Timeline</span><span className="text-slate-200 text-xs font-mono">{formatTime(currentTime)}</span></div>
+                                    <div className="px-3 py-0.5 text-center"><span className="text-[6px] text-slate-500 block uppercase mb-0.5 tracking-tighter">Posisi</span><span className="text-slate-200 text-xs font-mono">{formatTime(currentTime)}</span></div>
                                 </div>
                             </div>
                         </header>
@@ -406,7 +443,7 @@
                         <main className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-4 pb-32">
                             {/* MASTER SCRUBBER */}
                             {masterTrack && (
-                                <section className="bg-amber-500/5 border border-amber-500/20 rounded-2xl p-4 shadow-2xl overflow-hidden">
+                                <section className="bg-amber-500/5 border border-amber-500/20 rounded-2xl p-4 shadow-2xl overflow-hidden relative">
                                     <div className="flex items-center justify-between mb-3 px-1">
                                         <div className="flex items-center gap-2">
                                             <Waves size={14} className="text-amber-500" />
@@ -466,7 +503,7 @@
                                             {isAnalyzing && idx === 0 && (
                                                 <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-40">
                                                     <Loader2 size={16} className="animate-spin text-amber-500 mr-2" />
-                                                    <span className="text-[8px] font-black uppercase tracking-widest text-amber-500">Processing Playlist...</span>
+                                                    <span className="text-[8px] font-black uppercase tracking-widest text-amber-500">Processing...</span>
                                                 </div>
                                             )}
                                         </div>
@@ -475,7 +512,7 @@
                             </div>
                         </main>
 
-                        {/* FOOTER CONTROL */}
+                        {/* FOOTER CONTROL STATION */}
                         <div className="absolute bottom-0 left-0 right-0 p-3 z-[100] pointer-events-none">
                             <div className="max-w-4xl mx-auto bg-black/95 backdrop-blur-2xl border border-white/10 rounded-2xl p-2 px-5 shadow-[0_30px_60px_rgba(0,0,0,1)] flex flex-col md:flex-row items-center gap-4 md:gap-6 pointer-events-auto border-t border-white/5">
                                 
@@ -513,7 +550,7 @@
                                             </button>
                                             <button 
                                                 onClick={async () => { if (Tone.context.state !== 'running') await Tone.start(); setIsMetronomeOn(!isMetronomeOn); }} 
-                                                className={`w-7 h-7 rounded border transition-all flex items-center justify-center ${isMetronomeOn ? 'bg-amber-500 text-black shadow-inner shadow-amber-900/20' : 'bg-white/5 border-white/5 text-slate-500'}`}
+                                                className={`w-7 h-7 rounded border transition-all flex items-center justify-center ${isMetronomeOn ? 'bg-amber-500 text-black shadow-inner shadow-amber-900/20' : 'bg-white/5 border-white/5 text-slate-500'} ${isBeatActive ? 'beat-flash' : ''}`}
                                                 title="Metronom Aktif"
                                             >
                                                 <Activity size={14} className={isMetronomeOn ? 'animate-pulse' : ''} />

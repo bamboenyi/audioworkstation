@@ -70,7 +70,8 @@
         import * as Tone from 'https://esm.sh/tone@14.8.49';
         import { 
             Play, Pause, Square, Volume2, Music, Activity, Timer, Trash2, Upload, Headphones, 
-            Plus, Loader2, ChevronUp, ChevronDown, Waves, X, Info, RotateCcw, FolderUp, ListMusic, ChevronRight, PanelLeftClose, PanelLeft
+            Plus, Loader2, ChevronUp, ChevronDown, Waves, X, Info, RotateCcw, FolderUp, ListMusic, 
+            ChevronRight, PanelLeftClose, PanelLeft
         } from 'https://esm.sh/lucide-react@0.263.1';
 
         const App = () => {
@@ -225,24 +226,29 @@
                 return result;
             };
 
-            // --- PLAYLIST LOGIC (DIPERBAIKI UNTUK IPHONE) ---
+            // --- PLAYLIST LOGIC (DIPERBAIKI UNTUK IPHONE & FOLDER) ---
             const handlePlaylistLoad = async (event) => {
                 const files = Array.from(event.target.files);
                 if (files.length === 0) return;
 
                 const projectGroups = {};
+                const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
                 files.forEach(file => {
                     if (!file.type.startsWith('audio/')) return;
                     
-                    // Deteksi struktur folder (untuk Desktop)
-                    const pathParts = file.webkitRelativePath ? file.webkitRelativePath.split('/') : [];
+                    // Deteksi folder (Desktop) atau Fallback (iPhone/Individual)
+                    let folderName = "";
+                    if (file.webkitRelativePath) {
+                        const pathParts = file.webkitRelativePath.split('/');
+                        if (pathParts.length > 1) {
+                            folderName = pathParts[pathParts.length - 2];
+                        }
+                    }
                     
-                    // Logika fallback untuk iPhone (jika webkitRelativePath kosong)
-                    let folderName = "Uploaded Tracks";
-                    if (pathParts.length > 2) {
-                        folderName = pathParts[pathParts.length - 2];
-                    } else if (pathParts.length === 2) {
-                        folderName = pathParts[0];
+                    // Jika di iPhone atau tidak ada info folder induk
+                    if (!folderName) {
+                        folderName = `Import ${timestamp}`;
                     }
 
                     if (!projectGroups[folderName]) projectGroups[folderName] = [];
@@ -258,8 +264,15 @@
                     loaded: false
                 }));
 
-                setPlaylist(playlistData);
-                loadProjectFromPlaylist(0, playlistData);
+                // Gabungkan dengan playlist yang sudah ada
+                setPlaylist(prev => {
+                    const newPlaylist = [...prev, ...playlistData];
+                    // Jika belum ada proyek yang dimuat, muat proyek pertama dari unggahan baru
+                    if (currentProjectIndex === -1) {
+                        loadProjectFromPlaylist(prev.length, newPlaylist);
+                    }
+                    return newPlaylist;
+                });
             };
 
             const loadProjectFromPlaylist = async (index, currentPlaylist = playlist) => {
